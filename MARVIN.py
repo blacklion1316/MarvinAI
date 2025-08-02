@@ -1,7 +1,13 @@
 import pyttsx3
+import openai
 from datetime import datetime
 import speech_recognition as sr 
+import os
+import dotenv
+# Load environment variables from .env file
+dotenv.load_dotenv()
 
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 class _TTS:
     def __init__(self):
@@ -10,8 +16,18 @@ class _TTS:
         self.engine.setProperty('volume', 1)  # Volume 0-1
 
     def speak(self, text):
-        self.engine.say(text)
-        self.engine.runAndWait()
+        engine = pyttsx3.init()
+        engine.setProperty('rate', self.engine.getProperty('rate'))
+        engine.setProperty('volume', self.engine.getProperty('volume'))
+        voices = engine.getProperty('voices')
+        # Try to match the current voice
+        current_voice = self.engine.getProperty('voice')
+        for v in voices:
+            if v.id == current_voice:
+                engine.setProperty('voice', v.id)
+                break
+        engine.say(text)
+        engine.runAndWait()
 
     
 
@@ -77,6 +93,15 @@ def takeCommandMic():
         print("Sorry, I did not understand that.")
         return None
 
+
+
+def chat_with_gpt(prompt):
+    response = openai.chat.completions.create(
+        model="gpt-4o-mini",  # Updated model name
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return response.choices[0].message.content.strip()
+
 def main():
 
     # tts.change_rate(300)  # Default rate
@@ -87,30 +112,16 @@ def main():
     tts.speak(greeting())  # Speak greeting based on the time of day
     while True:
         user_input = takeCommandMic()
-        if user_input and user_input.lower() in ["exit", "quit", "stop"]:
-            tts.speak(greeting() + "and ")  # Speak greeting based on the time of day
+        if user_input is None:
+            continue
+        user_input = user_input.lower()
+        if "exit" in user_input or "quit" in user_input:
             tts.speak("Goodbye! Have a great day!")
             break
-        elif user_input and user_input.lower() in ["time", "current time"]:
-            current_time = time()
-            tts.speak(f"The current time is {current_time}.")
-        elif user_input and user_input.lower() in ["date", "current date"]:
-            current_date = date()
-            tts.speak(f"The current date is {current_date}.")
-        elif user_input and user_input.lower() in ["greeting", "hello"]:
-            tts.speak(greeting())
-        elif user_input and user_input.lower() in ["change voice", "voice change"]:
-            tts.change_voice(1)
-            tts.speak("Hello This is Marvin.")
-        elif user_input and user_input.lower() in ["change voice 2", "voice change 2"]:
-            tts.change_voice(2)
-            tts.speak("Hello This is Farvin.")
-
         else:
-            tts.speak(f"You said: {user_input}")
-            # You can add more commands here to handle specific user inputs
-            # For example, you could add commands for weather, news, etc.
+            response = chat_with_gpt(user_input)
+            print(f"GPT-4 Response: {response}")
+            tts.speak(response)
 
 if __name__ == "__main__":
     main()
-    

@@ -3,3 +3,5 @@ SpeechRecognition==3.8.1
 standard-aifc==3.13.0
 pyaudio==0.2.14
 standard-distutils==3.11.9
+openai==1.98.0
+python-dotenv==1.0.0
