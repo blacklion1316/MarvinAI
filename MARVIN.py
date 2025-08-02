@@ -4,47 +4,63 @@ from datetime import datetime
 import speech_recognition as sr 
 import os
 import dotenv
-# Load environment variables from .env file
-dotenv.load_dotenv()
+
+# Load environment variables from .env.dev file
+dotenv.load_dotenv(".env.dev")
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+
 class _TTS:
     def __init__(self):
-        self.engine = pyttsx3.init()
-        self.engine.setProperty('rate', 200)  # Speed of speech
-        self.engine.setProperty('volume', 1)  # Volume 0-1
+        self.rate = 200
+        self.volume = 1
+        self.voice_id = 0  # Default to male voice
+        
+    def _create_engine(self):
+        """Create a fresh engine with current settings"""
+        engine = pyttsx3.init()
+        engine.setProperty('rate', self.rate)
+        engine.setProperty('volume', self.volume)
+        
+        voices = engine.getProperty('voices')
+        if self.voice_id < len(voices):
+            engine.setProperty('voice', voices[self.voice_id].id)
+        
+        return engine
 
     def speak(self, text):
-        engine = pyttsx3.init()
-        engine.setProperty('rate', self.engine.getProperty('rate'))
-        engine.setProperty('volume', self.engine.getProperty('volume'))
-        voices = engine.getProperty('voices')
-        # Try to match the current voice
-        current_voice = self.engine.getProperty('voice')
-        for v in voices:
-            if v.id == current_voice:
-                engine.setProperty('voice', v.id)
-                break
-        engine.say(text)
-        engine.runAndWait()
-
-    
+        try:
+            engine = self._create_engine()
+            engine.say(text)
+            engine.runAndWait()
+            engine.stop()  # Properly stop the engine
+        except Exception as e:
+            print(f"TTS Error: {e}")
+            # Fallback: try again with a new engine
+            try:
+                engine = self._create_engine()
+                engine.say(text)
+                engine.runAndWait()
+                engine.stop()
+            except:
+                print("TTS failed completely")
 
     def get_voices(self, voice_id=None):
-        voices = self.engine.getProperty('voices')
-        if voice_id == 1:
-            self.engine.setProperty('voice', voices[0].id)
-            self.speak("Hello This is Marvin")
-        elif voice_id == 2:
-            self.engine.setProperty('voice', voices[1].id)
-            self.speak("Hello This is Farvin")
+        if voice_id == 0:  # Male voice (David)
+            self.voice_id = 0
+        elif voice_id == 1:  # Female voice (Zira)
+            self.voice_id = 1
 
     def change_voice(self, voice_id):
         self.get_voices(voice_id)
+        if voice_id == 0:
+            self.speak("Hello, this is Marvin with male voice")
+        elif voice_id == 1:
+            self.speak("Hello, this is Marvin with female voice")
 
     def change_rate(self, rate):
-        self.engine.setProperty('rate', rate)
+        self.rate = rate
 
 tts = _TTS()
 
@@ -104,9 +120,9 @@ def chat_with_gpt(prompt):
 
 def main():
 
-    # tts.change_rate(300)  # Default rate
-    tts.change_voice(2)  # Default voice
-    tts.speak("Hello, I am Marvin. How can I assist you today?")
+    tts.change_voice(1)  # Female voice (Zira) - do this first
+    # tts.change_rate(300)  # Then set the rate
+    tts.speak("How can I assist you today?")
     # tts.speak(f"Current time is: {time()}")  # Speak current time for reference
     # tts.speak(f"Current date is: {date()}")  # Speak current date for reference
     tts.speak(greeting())  # Speak greeting based on the time of day

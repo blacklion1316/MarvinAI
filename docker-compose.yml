@@ -1,0 +1,51 @@
+services:
+    ollama:
+        build:
+            context: .
+            dockerfile: Dockerfile.ollama
+        container_name: ollama
+        ports:
+            - "11434:11434" # Expose Ollama API
+        environment:
+            OLLAMA_ORIGINS: "chrome-extension://*,moz-extension://*,safari-web-extension://*,http://n8n:5678,http://localhost:5678"
+            OLLAMA_HOST: "0.0.0.0" # Important! Bind to all interfaces so n8n can connect
+        volumes:
+            - ollama_data:/root/.ollama # Persist models between container restarts
+        networks:
+            - n8n-net
+        restart: unless-stopped
+    n8n:
+        image: docker.n8n.io/n8nio/n8n
+        container_name: n8n
+        ports:
+            - "5678:5678" # n8n UI
+        environment:
+            NODE_OPTIONS: "--max-old-space-size=4096"
+            N8N_HOST: n8n
+            N8N_PORT: 5678
+            WEBHOOK_URL: "http://localhost:5678"
+        volumes:
+            - n8n_data:/home/node/.n8n
+        networks:
+            - n8n-net
+        depends_on:
+            - ollama
+        restart: unless-stopped
+
+    # Optional: Ngrok for HTTPS tunnel (Telegram, external services)
+    ngrok:
+        image: wernight/ngrok
+        container_name: ngrok
+        environment:
+            NGROK_PORT: "n8n:5678"
+        networks:
+            - n8n-net
+        depends_on:
+            - n8n
+
+networks:
+    n8n-net:
+
+volumes:
+    n8n_data:
+    ollama_data:

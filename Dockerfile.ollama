@@ -1,0 +1,42 @@
+# Use the official Ollama image as base
+FROM ollama/ollama:latest
+
+# Set environment variables
+ENV OLLAMA_HOST=0.0.0.0:11434
+
+# Create a script to download the model
+RUN echo '#!/bin/bash\n\
+# Start Ollama server in background\n\
+ollama serve &\n\
+OLLAMA_PID=$!\n\
+\n\
+# Wait for server to be ready\n\
+echo "Waiting for Ollama server to start..."\n\
+until ollama list >/dev/null 2>&1; do\n\
+  sleep 2\n\
+done\n\
+\n\
+echo "Server ready, pulling llama3.2 model..."\n\
+ollama pull llama3.2\n\
+\n\
+echo "Model downloaded successfully!"\n\
+\n\
+# Stop the background server\n\
+kill $OLLAMA_PID\n\
+wait $OLLAMA_PID 2>/dev/null\n\
+\n\
+echo "Setup complete"' > /usr/local/bin/download-model.sh
+
+# Make the script executable
+RUN chmod +x /usr/local/bin/download-model.sh
+
+# Download the model during build
+RUN /usr/local/bin/download-model.sh
+
+# Clean up the download script
+RUN rm /usr/local/bin/download-model.sh
+
+# Expose the API port
+EXPOSE 11434
+
+# Use the default Ollama CMD from the base image
