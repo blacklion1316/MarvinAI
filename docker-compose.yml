@@ -12,40 +12,53 @@ services:
         volumes:
             - ollama_data:/root/.ollama # Persist models between container restarts
         networks:
-            - n8n-net
+            - app-network
         restart: unless-stopped
-    n8n:
-        image: docker.n8n.io/n8nio/n8n
-        container_name: n8n
-        ports:
-            - "5678:5678" # n8n UI
+
+    postgres:
+        image: postgres:16-alpine
+        container_name: postgres
+        networks:
+            - app-network
+        restart: unless-stopped
         environment:
+            POSTGRES_USER: n8n
+            POSTGRES_PASSWORD: n8n
+            POSTGRES_DB: n8n
+        volumes:
+            - postgres_storage:/var/lib/postgresql/data
+
+    n8n:
+        image: n8nio/n8n:latest
+        container_name: n8n
+        networks:
+            - app-network
+        restart: unless-stopped
+        ports:
+            - "5678:5678"
+        environment:
+            DB_TYPE: postgresdb
+            DB_POSTGRESDB_HOST: postgres
+            DB_POSTGRESDB_PORT: 5432
+            DB_POSTGRESDB_DATABASE: n8n
+            DB_POSTGRESDB_USER: n8n
+            DB_POSTGRESDB_PASSWORD: n8n
+            N8N_ENCRYPTION_KEY: a_secure_encryption_key_change_this
             NODE_OPTIONS: "--max-old-space-size=4096"
             N8N_HOST: n8n
             N8N_PORT: 5678
             WEBHOOK_URL: "http://localhost:5678"
         volumes:
-            - n8n_data:/home/node/.n8n
-        networks:
-            - n8n-net
+            - n8n_storage:/home/node/.n8n
         depends_on:
+            - postgres
             - ollama
-        restart: unless-stopped
-
-    # Optional: Ngrok for HTTPS tunnel (Telegram, external services)
-    ngrok:
-        image: wernight/ngrok
-        container_name: ngrok
-        environment:
-            NGROK_PORT: "n8n:5678"
-        networks:
-            - n8n-net
-        depends_on:
-            - n8n
 
 networks:
-    n8n-net:
+    app-network:
+        driver: bridge
 
 volumes:
-    n8n_data:
+    n8n_storage:
     ollama_data:
+    postgres_storage:
