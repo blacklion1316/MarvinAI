@@ -1,5 +1,6 @@
 .idea/*
 .env.dev
+.env
 __pycache__/*
 credentials.json
 token.json

@@ -13,8 +13,8 @@ import numpy as np
 import sounddevice as sd
 import scipy.io.wavfile as wav
 
-# Load environment variables from .env.dev file
-dotenv.load_dotenv(".env.dev")
+# Load environment variables from .env file
+dotenv.load_dotenv(".env")
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
@@ -71,6 +71,110 @@ class _TTS:
         self.rate = rate
 
 tts = _TTS()
+
+# ====== Memory System ======
+MEMORY_FILE = "marvin_memory.json"
+CONVERSATION_HISTORY = []
+MAX_HISTORY = 10  # Number of exchanges to remember in session
+
+def load_memory():
+    """Load persistent memory from JSON file"""
+    try:
+        if os.path.exists(MEMORY_FILE):
+            with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"Error loading memory: {e}")
+    return {
+        "facts": [],
+        "preferences": {},
+        "notes": [],
+        "created": datetime.now().isoformat()
+    }
+
+def save_memory(memory_data):
+    """Save memory data to JSON file"""
+    try:
+        memory_data["last_updated"] = datetime.now().isoformat()
+        with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(memory_data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        print(f"Error saving memory: {e}")
+        return False
+
+def add_to_conversation_history(role, content):
+    """Add message to conversation history"""
+    global CONVERSATION_HISTORY
+    CONVERSATION_HISTORY.append({
+        "role": role, 
+        "content": content, 
+        "timestamp": datetime.now().isoformat()
+    })
+    # Keep only recent history
+    if len(CONVERSATION_HISTORY) > MAX_HISTORY * 2:  # *2 because user+assistant pairs
+        CONVERSATION_HISTORY = CONVERSATION_HISTORY[-MAX_HISTORY * 2:]
+
+def remember_fact(fact):
+    """Store a fact in long-term memory"""
+    memory = load_memory()
+    fact_entry = {
+        "content": fact,
+        "timestamp": datetime.now().isoformat(),
+        "source": "user_input"
+    }
+    memory["facts"].append(fact_entry)
+    return save_memory(memory)
+
+def remember_note(note):
+    """Store a note in long-term memory"""
+    memory = load_memory()
+    note_entry = {
+        "content": note,
+        "timestamp": datetime.now().isoformat()
+    }
+    memory["notes"].append(note_entry)
+    return save_memory(memory)
+
+def set_preference(key, value):
+    """Store a user preference"""
+    memory = load_memory()
+    memory["preferences"][key] = {
+        "value": value,
+        "timestamp": datetime.now().isoformat()
+    }
+    return save_memory(memory)
+
+def recall_facts(limit=5):
+    """Retrieve recent facts from memory"""
+    memory = load_memory()
+    facts = memory.get("facts", [])
+    return facts[-limit:] if facts else []
+
+def recall_notes(limit=5):
+    """Retrieve recent notes from memory"""
+    memory = load_memory()
+    notes = memory.get("notes", [])
+    return notes[-limit:] if notes else []
+
+def get_memory_summary():
+    """Get a summary of stored memory for context"""
+    memory = load_memory()
+    summary = []
+    
+    # Recent facts
+    facts = memory.get("facts", [])
+    if facts:
+        recent_facts = [f["content"] for f in facts[-3:]]
+        summary.append(f"Recent facts: {'; '.join(recent_facts)}")
+    
+    # User preferences
+    prefs = memory.get("preferences", {})
+    if prefs:
+        pref_list = [f"{k}: {v['value']}" for k, v in prefs.items()]
+        summary.append(f"User preferences: {'; '.join(pref_list)}")
+    
+    return " | ".join(summary) if summary else "No stored memories"
 
 # ====== Audio Record + Whisper ======
 def record_audio(duration=5, samplerate=44100):
@@ -460,6 +564,7 @@ def build_system_prompt():
     # Give GPT visibility of directory + available commands + OS
     dir_items = list_current_dir()
     path_bins = list_path_executables()
+    memory_context = get_memory_summary()
 
     sysname = platform.system()
     os_hint = {
@@ -494,6 +599,8 @@ You can see the current working directory files:
 You can see a sample of executables available on PATH:
 - {", ".join(path_bins[:100])}
 
+Memory Context: {memory_context}
+
 Guidance (choose appropriate commands for THIS OS):
 {os_hint}
 
@@ -504,17 +611,32 @@ Guidance (choose appropriate commands for THIS OS):
 def gpt_decide(user_text: str) -> dict:
     """Ask GPT to either produce a run command or a chat reply (JSON-only contract)."""
     system_prompt = build_system_prompt()
+    
+    # Add user input to conversation history
+    add_to_conversation_history("user", user_text)
+    
+    # Build messages with conversation history for context
+    messages = [{"role": "system", "content": system_prompt}]
+    
+    # Add recent conversation history (excluding current user input)
+    if CONVERSATION_HISTORY[:-1]:  # All except the just-added user input
+        for msg in CONVERSATION_HISTORY[-8:]:  # Last 8 messages for context
+            if msg["role"] in ["user", "assistant"]:
+                messages.append({"role": msg["role"], "content": msg["content"]})
+    
+    # Add current user input
+    messages.append({"role": "user", "content": user_text})
 
     # Use chat.completions for compatibility with user's original pattern
     resp = openai.chat.completions.create(
         model="gpt-4o-mini",
         temperature=0,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_text}
-        ]
+        messages=messages
     )
     content = resp.choices[0].message.content.strip()
+    
+    # Add assistant response to conversation history
+    add_to_conversation_history("assistant", content)
 
     # Content must be JSON one-liner. Try to parse; if fail, fallback to chat.
     try:
@@ -596,6 +718,90 @@ def main():
             print(f"🤖 {bye}")
             tts.speak(bye)
             break
+
+        # Memory commands - check BEFORE GPT processing
+        user_lower = user_input.lower()
+        
+        # Remember commands
+        if user_lower.startswith("remember that") or user_lower.startswith("remember this"):
+            fact = user_input[len("remember that"):].strip() if user_lower.startswith("remember that") else user_input[len("remember this"):].strip()
+            if remember_fact(fact):
+                response = "I've stored that in my memory."
+                print(f"🤖 {response}")
+                tts.speak(response)
+            else:
+                response = "Sorry, I had trouble saving that to memory."
+                print(f"🤖 {response}")
+                tts.speak(response)
+            continue
+            
+        # Note commands
+        if user_lower.startswith("note that") or user_lower.startswith("take note"):
+            note = user_input[len("note that"):].strip() if user_lower.startswith("note that") else user_input[len("take note"):].strip()
+            if remember_note(note):
+                response = "I've added that note."
+                print(f"🤖 {response}")
+                tts.speak(response)
+            else:
+                response = "Sorry, I couldn't save that note."
+                print(f"🤖 {response}")
+                tts.speak(response)
+            continue
+            
+        # Recall commands
+        if "what do you remember" in user_lower or "recall facts" in user_lower:
+            facts = recall_facts()
+            if facts:
+                fact_list = [f["content"] for f in facts]
+                response = f"Here's what I remember: {'; '.join(fact_list)}"
+                print(f"🤖 {response}")
+                tts.speak(response)
+            else:
+                response = "I don't have any facts stored in memory yet."
+                print(f"🤖 {response}")
+                tts.speak(response)
+            continue
+            
+        # Show notes
+        if "show notes" in user_lower or "what notes" in user_lower:
+            notes = recall_notes()
+            if notes:
+                note_list = [f["content"] for f in notes]
+                response = f"Here are my notes: {'; '.join(note_list)}"
+                print(f"🤖 {response}")
+                tts.speak(response)
+            else:
+                response = "I don't have any notes stored."
+                print(f"🤖 {response}")
+                tts.speak(response)
+            continue
+            
+        # Preference commands
+        if user_lower.startswith("set preference") or user_lower.startswith("my preference"):
+            # Simple parsing: "set preference theme to dark" or "my preference is coffee"
+            if " is " in user_input:
+                parts = user_input.split(" is ", 1)
+                key = parts[0].replace("set preference", "").replace("my preference", "").strip()
+                value = parts[1].strip()
+            elif " to " in user_input:
+                parts = user_input.split(" to ", 1)
+                key = parts[0].replace("set preference", "").strip()
+                value = parts[1].strip()
+            else:
+                response = "I need a preference in the format 'set preference [key] to [value]' or 'my preference is [value]'"
+                print(f"🤖 {response}")
+                tts.speak(response)
+                continue
+                
+            if set_preference(key, value):
+                response = f"I've saved your preference: {key} = {value}"
+                print(f"🤖 {response}")
+                tts.speak(response)
+            else:
+                response = "Sorry, I couldn't save that preference."
+                print(f"🤖 {response}")
+                tts.speak(response)
+            continue
 
         # Use GPT to decide whether to run a command or chat
         decision = gpt_decide(user_input)
