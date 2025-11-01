@@ -12,11 +12,33 @@ import tempfile
 import numpy as np
 import sounddevice as sd
 import scipy.io.wavfile as wav
+import sys
 
-# Load environment variables from .env file
-dotenv.load_dotenv(".env")
+# ========== Configuration Constants ==========
+AUDIO_DURATION = 5  # seconds for voice recording
+AUDIO_SAMPLERATE = 44100  # Hz
+TTS_RATE = 200  # words per minute
+TTS_VOICE_ID = 1  # 0=male, 1=female
+GPT_MODEL = "gpt-4o-mini"  # Main model for decisions
+WHISPER_MODEL = "whisper-1"  # Transcription model
+MAX_HISTORY = 10  # Number of conversation exchanges to remember
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# ========== Environment Setup ==========
+def load_environment():
+    """Load and validate environment variables"""
+    dotenv.load_dotenv(".env")
+    api_key = os.getenv("OPENAI_API_KEY")
+    
+    if not api_key:
+        print("❌ ERROR: OPENAI_API_KEY not found in .env file")
+        print("Please create a .env file with your OpenAI API key:")
+        print('OPENAI_API_KEY=your-api-key-here')
+        sys.exit(1)
+    
+    return api_key
+
+# Load and validate environment
+openai.api_key = load_environment()
 
 
 class _TTS:
@@ -90,10 +112,9 @@ class _TTS:
 
 tts = _TTS()
 
-# ====== Memory System ======
+# ========== Memory System ==========
 MEMORY_FILE = "marvin_memory.json"
 CONVERSATION_HISTORY = []
-MAX_HISTORY = 10  # Number of exchanges to remember in session
 
 def load_memory():
     """Load persistent memory from JSON file"""
@@ -194,8 +215,9 @@ def get_memory_summary():
     
     return " | ".join(summary) if summary else "No stored memories"
 
-# ====== Audio Record + Whisper ======
-def record_audio(duration=5, samplerate=44100):
+# ========== Audio Record + Whisper ==========
+def record_audio(duration=AUDIO_DURATION, samplerate=AUDIO_SAMPLERATE):
+    """Record audio from the microphone"""
     print("🎤 Listening...")
     audio = sd.rec(int(duration * samplerate), samplerate=samplerate, channels=1, dtype=np.int16)
     sd.wait()
@@ -203,14 +225,14 @@ def record_audio(duration=5, samplerate=44100):
     return audio, samplerate
 
 def transcribe_with_whisper(audio, samplerate):
+    """Transcribe audio using OpenAI Whisper API"""
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmpfile:
         wav.write(tmpfile.name, samplerate, audio)
         tmpfile_path = tmpfile.name
     try:
         with open(tmpfile_path, "rb") as f:
-            # Works with openai>=1.0 style
             transcript = openai.audio.transcriptions.create(
-                model="whisper-1",
+                model=WHISPER_MODEL,
                 file=f
             )
         return getattr(transcript, "text", None) or transcript.get("text")
@@ -410,9 +432,9 @@ def takeCommandMic():
         return None
 
 def takeCommandWhisper():
-    """Use Whisper for voice recognition instead of Google Speech Recognition"""
+    """Take voice command using Whisper transcription"""
     try:
-        audio, sr = record_audio(duration=5)
+        audio, sr = record_audio(duration=AUDIO_DURATION)
         user_text = transcribe_with_whisper(audio, sr)
         
         if not user_text:
@@ -420,7 +442,7 @@ def takeCommandWhisper():
             return None
             
         print(f"🗣 You said: {user_text}")
-        return user_text
+        return user_text.lower()  # Return lowercase for easier command matching
     except Exception as e:
         print(f"Error with Whisper recognition: {e}")
         return None
@@ -430,7 +452,7 @@ def check_openai_connection():
     try:
         # Simple test to check if API key is working
         response = openai.chat.completions.create(
-            model="gpt-4o-mini",
+            model=GPT_MODEL,
             messages=[{"role": "user", "content": "test"}],
             max_tokens=1
         )
@@ -547,7 +569,7 @@ def chat_with_gpt(prompt):
     """Send a prompt to OpenAI GPT and get a response"""
     try:
         response = openai.chat.completions.create(
-            model="gpt-4o-mini",  # Updated model name
+            model=GPT_MODEL,
             messages=[{"role": "user", "content": prompt}]
         )
         return response.choices[0].message.content.strip()
@@ -647,7 +669,7 @@ def gpt_decide(user_text: str) -> dict:
 
     # Use chat.completions for compatibility with user's original pattern
     resp = openai.chat.completions.create(
-        model="gpt-4o-mini",
+        model=GPT_MODEL,
         temperature=0,
         messages=messages
     )
@@ -728,21 +750,17 @@ def main():
             continue
             
         # Quick local exit - check BEFORE GPT processing
-        # Clean input by removing punctuation and extra whitespace
-        import string
-        user_clean = user_input.strip().lower().translate(str.maketrans('', '', string.punctuation))
-        if user_clean in {"exit", "quit", "bye", "goodbye", "stop"}:
+        if any(word in user_input for word in ["exit", "quit", "bye", "goodbye", "stop"]):
             bye = "Goodbye! Have a great day!"
             print(f"🤖 {bye}")
             tts.speak(bye)
             break
 
-        # Memory commands - check BEFORE GPT processing
-        user_lower = user_input.lower()
+        # Memory commands - check BEFORE GPT processing (user_input is already lowercase from takeCommandWhisper)
         
         # Remember commands
-        if user_lower.startswith("remember that") or user_lower.startswith("remember this"):
-            fact = user_input[len("remember that"):].strip() if user_lower.startswith("remember that") else user_input[len("remember this"):].strip()
+        if user_input.startswith("remember that") or user_input.startswith("remember this"):
+            fact = user_input[len("remember that"):].strip() if user_input.startswith("remember that") else user_input[len("remember this"):].strip()
             if remember_fact(fact):
                 response = "I've stored that in my memory."
                 print(f"🤖 {response}")
@@ -754,8 +772,8 @@ def main():
             continue
             
         # Note commands
-        if user_lower.startswith("note that") or user_lower.startswith("take note"):
-            note = user_input[len("note that"):].strip() if user_lower.startswith("note that") else user_input[len("take note"):].strip()
+        if user_input.startswith("note that") or user_input.startswith("take note"):
+            note = user_input[len("note that"):].strip() if user_input.startswith("note that") else user_input[len("take note"):].strip()
             if remember_note(note):
                 response = "I've added that note."
                 print(f"🤖 {response}")
@@ -767,7 +785,7 @@ def main():
             continue
             
         # Recall commands
-        if "what do you remember" in user_lower or "recall facts" in user_lower:
+        if "what do you remember" in user_input or "recall facts" in user_input:
             facts = recall_facts()
             if facts:
                 fact_list = [f["content"] for f in facts]
@@ -781,7 +799,7 @@ def main():
             continue
             
         # Show notes
-        if "show notes" in user_lower or "what notes" in user_lower:
+        if "show notes" in user_input or "what notes" in user_input:
             notes = recall_notes()
             if notes:
                 note_list = [f["content"] for f in notes]
@@ -795,7 +813,7 @@ def main():
             continue
             
         # Preference commands
-        if user_lower.startswith("set preference") or user_lower.startswith("my preference"):
+        if user_input.startswith("set preference") or user_input.startswith("my preference"):
             # Simple parsing: "set preference theme to dark" or "my preference is coffee"
             if " is " in user_input:
                 parts = user_input.split(" is ", 1)
