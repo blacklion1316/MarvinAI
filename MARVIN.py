@@ -27,6 +27,10 @@ class _TTS:
         
     def _create_engine(self):
         """Create a fresh engine with current settings"""
+        # Skip pyttsx3 initialization on macOS to avoid objc errors
+        if platform.system() == "Darwin":
+            return None
+            
         engine = pyttsx3.init()
         engine.setProperty('rate', self.rate)
         engine.setProperty('volume', self.volume)
@@ -38,28 +42,33 @@ class _TTS:
         return engine
 
     def speak(self, text):
-        # Use macOS native 'say' command if on macOS and pyttsx3 fails
+        # Use macOS native 'say' command on macOS (avoids pyttsx3/objc issues)
         if platform.system() == "Darwin":
             try:
-                subprocess.run(["say", text], check=True)
+                # Adjust rate for macOS say command (150-300 WPM)
+                rate_words = int(self.rate)  # Use rate directly as words per minute
+                subprocess.run(["say", "-r", str(rate_words), text], check=True)
                 return
             except Exception as e:
                 print(f"macOS say command failed: {e}")
+                return
         
-        # Try pyttsx3 for Windows/Linux or as fallback
+        # Use pyttsx3 for Windows/Linux
         try:
             engine = self._create_engine()
-            engine.say(text)
-            engine.runAndWait()
-            engine.stop()  # Properly stop the engine
+            if engine:
+                engine.say(text)
+                engine.runAndWait()
+                engine.stop()
         except Exception as e:
             print(f"TTS Error: {e}")
             # Fallback: try again with a new engine
             try:
                 engine = self._create_engine()
-                engine.say(text)
-                engine.runAndWait()
-                engine.stop()
+                if engine:
+                    engine.say(text)
+                    engine.runAndWait()
+                    engine.stop()
             except:
                 print("TTS failed completely")
 
