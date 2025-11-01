@@ -38,6 +38,15 @@ class _TTS:
         return engine
 
     def speak(self, text):
+        # Use macOS native 'say' command if on macOS and pyttsx3 fails
+        if platform.system() == "Darwin":
+            try:
+                subprocess.run(["say", text], check=True)
+                return
+            except Exception as e:
+                print(f"macOS say command failed: {e}")
+        
+        # Try pyttsx3 for Windows/Linux or as fallback
         try:
             engine = self._create_engine()
             engine.say(text)
