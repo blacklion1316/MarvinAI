@@ -1,0 +1,5 @@
+# CI/Testing dependencies (excludes audio packages that require system libraries)
+# These packages are needed for running memory tests in GitHub Actions
+openai==1.98.0
+requests>=2.25.0
+python-dotenv==1.1.1
