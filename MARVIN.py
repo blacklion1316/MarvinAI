@@ -13,6 +13,7 @@ import numpy as np
 import sounddevice as sd
 import scipy.io.wavfile as wav
 import sys
+import camFeatures  # Camera features with face detection and analysis
 
 # ========== Configuration Constants ==========
 AUDIO_DURATION = 5  # seconds for voice recording
@@ -22,6 +23,11 @@ TTS_VOICE_ID = 1  # 0=male, 1=female
 GPT_MODEL = "gpt-4o-mini"  # Main model for decisions
 WHISPER_MODEL = "whisper-1"  # Transcription model
 MAX_HISTORY = 10  # Number of conversation exchanges to remember
+
+# Camera Configuration
+CAMERA_WARMUP_SECONDS = 3  # Seconds to warm up camera before snapshot
+SNAPSHOT_FILENAME = "snapshot.jpg"  # Default snapshot filename
+EXPRESSION_SNAPSHOT_FILENAME = "expression_snapshot.jpg"  # Facial analysis snapshot
 
 # ========== Environment Setup ==========
 def load_environment():
@@ -837,6 +843,54 @@ def main():
                 response = "Sorry, I couldn't save that preference."
                 print(f"🤖 {response}")
                 tts.speak(response)
+            continue
+
+        # ========== Camera Commands ==========
+        # Open camera with face/hand detection
+        if "open camera" in user_input or "start camera" in user_input:
+            response = "Opening camera with face and hand detection. Press Q to close the window."
+            print(f"🤖 {response}")
+            tts.speak(response)
+            camFeatures.open_camera()
+            continue
+            
+        # Compare two cameras side-by-side
+        if "compare cameras" in user_input or "compare faces" in user_input:
+            response = "Opening dual camera comparison. Press Q to close."
+            print(f"🤖 {response}")
+            tts.speak(response)
+            camFeatures.compare_cameras()
+            continue
+            
+        # Take a snapshot
+        if "take snapshot" in user_input or "take a picture" in user_input or "take photo" in user_input:
+            response = "Taking a snapshot. Hold still for 3 seconds."
+            print(f"🤖 {response}")
+            tts.speak(response)
+            camFeatures.take_snapshot(SNAPSHOT_FILENAME)
+            response = "Snapshot captured and saved."
+            print(f"🤖 {response}")
+            tts.speak(response)
+            continue
+            
+        # Describe what's in front of camera
+        if "describe scene" in user_input or "what do you see" in user_input or "look around" in user_input:
+            response = "Let me take a look."
+            print(f"🤖 {response}")
+            tts.speak(response)
+            description = camFeatures.describe_scene()
+            print(f"🤖 Scene: {description}")
+            tts.speak(description)
+            continue
+            
+        # Analyze facial expressions
+        if "analyze face" in user_input or "analyze expression" in user_input or "read my emotion" in user_input or "how do i look" in user_input:
+            response = "Taking a photo to analyze your facial expression."
+            print(f"🤖 {response}")
+            tts.speak(response)
+            analysis = camFeatures.analyze_expression_from_camera()
+            print(f"🧠 Facial Analysis:\n{analysis}")
+            tts.speak(analysis)
             continue
 
         # Use GPT to decide whether to run a command or chat

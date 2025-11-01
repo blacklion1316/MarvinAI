@@ -11,3 +11,6 @@ google-api-python-client>=2.70.0
 numpy==2.3.2
 sounddevice==0.5.2
 scipy==1.16.1
+opencv-python==4.10.0.84
+cvzone==1.6.1
+rapidfuzz==3.10.1
